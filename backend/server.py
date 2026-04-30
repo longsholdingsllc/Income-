@@ -237,7 +237,7 @@ class DCAResp(BaseModel):
 
 # ---------- Auth ----------
 @api_router.post("/auth/register", response_model=AuthResp)
-async def register(req: RegisterReq):
+async def register(req: RegisterReq) -> AuthResp:
     existing = await db.users.find_one({"email": req.email.lower()}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -258,7 +258,7 @@ async def register(req: RegisterReq):
 
 
 @api_router.post("/auth/login", response_model=AuthResp)
-async def login(req: LoginReq):
+async def login(req: LoginReq) -> AuthResp:
     user = await db.users.find_one({"email": req.email.lower()}, {"_id": 0})
     if not user or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -270,13 +270,13 @@ async def login(req: LoginReq):
 
 
 @api_router.get("/auth/me", response_model=UserOut)
-async def me(user: dict = Depends(get_current_user)):
+async def me(user: dict = Depends(get_current_user)) -> UserOut:
     return UserOut(id=user["id"], email=user["email"], name=user["name"], created_at=user["created_at"])
 
 
 # ---------- Streams ----------
 @api_router.post("/streams", response_model=StreamOut)
-async def create_stream(req: StreamCreate, user: dict = Depends(get_current_user)):
+async def create_stream(req: StreamCreate, user: dict = Depends(get_current_user)) -> StreamOut:
     sid = str(uuid.uuid4())
     doc = {
         "id": sid,
@@ -291,7 +291,7 @@ async def create_stream(req: StreamCreate, user: dict = Depends(get_current_user
 
 
 @api_router.get("/streams", response_model=List[StreamOut])
-async def list_streams(user: dict = Depends(get_current_user)):
+async def list_streams(user: dict = Depends(get_current_user)) -> List[StreamOut]:
     streams = await db.streams.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
     # compute total earned per stream
     result = []
@@ -306,7 +306,7 @@ async def list_streams(user: dict = Depends(get_current_user)):
 
 
 @api_router.delete("/streams/{stream_id}")
-async def delete_stream(stream_id: str, user: dict = Depends(get_current_user)):
+async def delete_stream(stream_id: str, user: dict = Depends(get_current_user)) -> dict:
     res = await db.streams.delete_one({"id": stream_id, "user_id": user["id"]})
     await db.entries.delete_many({"stream_id": stream_id, "user_id": user["id"]})
     if res.deleted_count == 0:
@@ -315,7 +315,7 @@ async def delete_stream(stream_id: str, user: dict = Depends(get_current_user)):
 
 
 @api_router.post("/streams/{stream_id}/entries", response_model=EntryOut)
-async def add_entry(stream_id: str, req: EntryCreate, user: dict = Depends(get_current_user)):
+async def add_entry(stream_id: str, req: EntryCreate, user: dict = Depends(get_current_user)) -> EntryOut:
     stream = await db.streams.find_one({"id": stream_id, "user_id": user["id"]}, {"_id": 0})
     if not stream:
         raise HTTPException(status_code=404, detail="Stream not found")
@@ -336,107 +336,133 @@ async def add_entry(stream_id: str, req: EntryCreate, user: dict = Depends(get_c
 
 
 @api_router.get("/streams/{stream_id}/entries", response_model=List[EntryOut])
-async def list_entries(stream_id: str, user: dict = Depends(get_current_user)):
+async def list_entries(stream_id: str, user: dict = Depends(get_current_user)) -> List[EntryOut]:
     entries = await db.entries.find(
         {"stream_id": stream_id, "user_id": user["id"]}, {"_id": 0}
     ).sort("date", -1).to_list(1000)
     return [EntryOut(**e) for e in entries]
 
 
-# ---------- Dashboard ----------
-@api_router.get("/dashboard/summary")
-async def dashboard_summary(user: dict = Depends(get_current_user)):
-    streams = await db.streams.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
-    entries = await db.entries.find({"user_id": user["id"]}, {"_id": 0}).to_list(5000)
+# ---------- Dashboard helpers ----------
+def _parse_entry_date(raw: str) -> Optional[datetime]:
+    """Parse ISO date from entry, always return aware UTC datetime or None."""
+    try:
+        d = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d
+    except Exception:
+        return None
 
-    total_invested = sum(float(s.get("initial_investment", 0)) for s in streams)
-    total_earned = sum(float(e["amount"]) for e in entries)
 
-    # monthly passive income (sum of this calendar month entries)
-    now = now_utc()
-    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
-    monthly = 0.0
+def _month_range(year: int, month: int) -> tuple[datetime, datetime]:
+    """Return [start, end) datetimes for the given calendar month."""
+    start = datetime(year, month, 1, tzinfo=timezone.utc)
+    if month == 12:
+        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    return start, end
+
+
+def _month_offset(now: datetime, months_back: int) -> tuple[int, int]:
+    """Return (year, month) months_back months before `now`."""
+    year, month = now.year, now.month - months_back
+    while month <= 0:
+        month += 12
+        year -= 1
+    return year, month
+
+
+def _sum_between(entries: List[dict], start: datetime, end: Optional[datetime] = None) -> float:
+    total = 0.0
     for e in entries:
-        try:
-            d = datetime.fromisoformat(e["date"].replace("Z", "+00:00"))
-            if d.tzinfo is None:
-                d = d.replace(tzinfo=timezone.utc)
-            if d >= month_start:
-                monthly += float(e["amount"])
-        except Exception:
-            pass
-
-    # last 6 months trend
-    trend = []
-    for i in range(5, -1, -1):
-        year = now.year
-        month = now.month - i
-        while month <= 0:
-            month += 12
-            year -= 1
-        m_start = datetime(year, month, 1, tzinfo=timezone.utc)
-        if month == 12:
-            m_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        d = _parse_entry_date(e.get("date", ""))
+        if d is None:
+            continue
+        if end is None:
+            if d >= start:
+                total += float(e["amount"])
         else:
-            m_end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
-        total = 0.0
-        for e in entries:
-            try:
-                d = datetime.fromisoformat(e["date"].replace("Z", "+00:00"))
-                if d.tzinfo is None:
-                    d = d.replace(tzinfo=timezone.utc)
-                if m_start <= d < m_end:
-                    total += float(e["amount"])
-            except Exception:
-                pass
-        trend.append({"month": m_start.strftime("%b"), "income": round(total, 2)})
+            if start <= d < end:
+                total += float(e["amount"])
+    return total
 
-    # breakdown by category (all-time earned)
-    by_cat: dict = {}
+
+def _build_trend(entries: List[dict], now: datetime, months: int = 6) -> List[dict]:
+    trend: List[dict] = []
+    for i in range(months - 1, -1, -1):
+        year, month = _month_offset(now, i)
+        m_start, m_end = _month_range(year, month)
+        total = _sum_between(entries, m_start, m_end)
+        trend.append({"month": m_start.strftime("%b"), "income": round(total, 2)})
+    return trend
+
+
+def _build_breakdown(streams: List[dict], entries: List[dict]) -> List[dict]:
     stream_cat = {s["id"]: s["category"] for s in streams}
+    by_cat: dict = {}
     for e in entries:
         cat = stream_cat.get(e["stream_id"], "other")
         by_cat[cat] = by_cat.get(cat, 0.0) + float(e["amount"])
-    breakdown = [{"category": k, "amount": round(v, 2)} for k, v in sorted(by_cat.items(), key=lambda x: -x[1])]
+    return [
+        {"category": k, "amount": round(v, 2)}
+        for k, v in sorted(by_cat.items(), key=lambda x: -x[1])
+    ]
 
-    # goal progress
-    goal = await db.goals.find_one({"user_id": user["id"]}, {"_id": 0})
-    monthly_target = float(goal["monthly_target"]) if goal else 0.0
-    freedom_number = float(goal["freedom_number"]) if goal else 0.0
-    progress = (monthly / monthly_target * 100.0) if monthly_target > 0 else 0.0
 
-    # recent entries
-    recent = sorted(entries, key=lambda e: e.get("date", ""), reverse=True)[:8]
-    recent_out = []
+def _build_recent(streams: List[dict], entries: List[dict], limit: int = 8) -> List[dict]:
     name_by_id = {s["id"]: s["name"] for s in streams}
-    for e in recent:
-        recent_out.append({
+    recent = sorted(entries, key=lambda e: e.get("date", ""), reverse=True)[:limit]
+    return [
+        {
             "id": e["id"],
             "stream_name": name_by_id.get(e["stream_id"], "Unknown"),
             "amount": float(e["amount"]),
             "date": e["date"],
             "note": e.get("note", ""),
-        })
+        }
+        for e in recent
+    ]
+
+
+# ---------- Dashboard ----------
+@api_router.get("/dashboard/summary")
+async def dashboard_summary(user: dict = Depends(get_current_user)) -> dict:
+    streams: List[dict] = await db.streams.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
+    entries: List[dict] = await db.entries.find({"user_id": user["id"]}, {"_id": 0}).to_list(5000)
+
+    now = now_utc()
+    month_start, _ = _month_range(now.year, now.month)
+
+    total_invested = sum(float(s.get("initial_investment", 0)) for s in streams)
+    total_earned = sum(float(e["amount"]) for e in entries)
+    monthly = _sum_between(entries, month_start)
+
+    goal = await db.goals.find_one({"user_id": user["id"]}, {"_id": 0})
+    monthly_target = float(goal["monthly_target"]) if goal else 0.0
+    freedom_number = float(goal["freedom_number"]) if goal else 0.0
+    progress = (monthly / monthly_target * 100.0) if monthly_target > 0 else 0.0
 
     return {
         "total_invested": round(total_invested, 2),
         "total_earned": round(total_earned, 2),
         "monthly_income": round(monthly, 2),
         "active_streams": len(streams),
-        "trend": trend,
-        "breakdown": breakdown,
+        "trend": _build_trend(entries, now, months=6),
+        "breakdown": _build_breakdown(streams, entries),
         "goal": {
             "monthly_target": monthly_target,
             "freedom_number": freedom_number,
             "progress_percent": round(min(progress, 999), 1),
         },
-        "recent_entries": recent_out,
+        "recent_entries": _build_recent(streams, entries, limit=8),
     }
 
 
 # ---------- Goals ----------
 @api_router.get("/goals", response_model=GoalOut)
-async def get_goal(user: dict = Depends(get_current_user)):
+async def get_goal(user: dict = Depends(get_current_user)) -> GoalOut:
     goal = await db.goals.find_one({"user_id": user["id"]}, {"_id": 0})
     if not goal:
         return GoalOut(user_id=user["id"], monthly_target=0, freedom_number=0, updated_at=iso(now_utc()))
@@ -444,7 +470,7 @@ async def get_goal(user: dict = Depends(get_current_user)):
 
 
 @api_router.post("/goals", response_model=GoalOut)
-async def upsert_goal(req: GoalUpsert, user: dict = Depends(get_current_user)):
+async def upsert_goal(req: GoalUpsert, user: dict = Depends(get_current_user)) -> GoalOut:
     doc = {
         "user_id": user["id"],
         "monthly_target": float(req.monthly_target),
@@ -482,7 +508,7 @@ def _extract_json(text: str):
 
 
 @api_router.post("/ai/ideas", response_model=IdeaResp)
-async def generate_ideas(req: IdeaReq, user: dict = Depends(get_current_user)):
+async def generate_ideas(req: IdeaReq, user: dict = Depends(get_current_user)) -> IdeaResp:
     system_msg = (
         "You are a world-class passive income strategist. Generate specific, realistic, and actionable "
         "passive income ideas tailored to the user's profile. Respond ONLY with valid JSON matching "
@@ -517,7 +543,7 @@ async def generate_ideas(req: IdeaReq, user: dict = Depends(get_current_user)):
 
 # ---------- AI Content Generator ----------
 @api_router.post("/ai/content", response_model=ContentResp)
-async def generate_content(req: ContentReq, user: dict = Depends(get_current_user)):
+async def generate_content(req: ContentReq, user: dict = Depends(get_current_user)) -> ContentResp:
     system_msg = (
         "You are an expert SEO copywriter who writes affiliate-friendly blog posts that rank. "
         "Respond ONLY with valid JSON (no prose, no markdown fences) matching the schema: "
@@ -556,7 +582,7 @@ COACH_SYSTEM = (
 
 
 @api_router.post("/ai/coach/chat", response_model=CoachResp)
-async def coach_chat(req: CoachReq, user: dict = Depends(get_current_user)):
+async def coach_chat(req: CoachReq, user: dict = Depends(get_current_user)) -> CoachResp:
     # Create or load session
     session_id = req.session_id
     if not session_id:
@@ -588,6 +614,7 @@ async def coach_chat(req: CoachReq, user: dict = Depends(get_current_user)):
     chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=session_id, system_message=COACH_SYSTEM).with_model(
         "anthropic", CLAUDE_MODEL
     )
+    reply: str = ""
     try:
         reply = await chat.send_message(UserMessage(text=req.message))
     except Exception as e:
@@ -610,7 +637,7 @@ async def coach_chat(req: CoachReq, user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/ai/coach/sessions", response_model=List[CoachSession])
-async def list_sessions(user: dict = Depends(get_current_user)):
+async def list_sessions(user: dict = Depends(get_current_user)) -> List[CoachSession]:
     sessions = await db.coach_sessions.find(
         {"user_id": user["id"]}, {"_id": 0}
     ).sort("updated_at", -1).to_list(100)
@@ -618,7 +645,7 @@ async def list_sessions(user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/ai/coach/sessions/{session_id}/messages", response_model=List[CoachMessage])
-async def session_messages(session_id: str, user: dict = Depends(get_current_user)):
+async def session_messages(session_id: str, user: dict = Depends(get_current_user)) -> List[CoachMessage]:
     session = await db.coach_sessions.find_one({"id": session_id, "user_id": user["id"]}, {"_id": 0})
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -630,7 +657,7 @@ async def session_messages(session_id: str, user: dict = Depends(get_current_use
 
 # ---------- DCA Simulator ----------
 @api_router.post("/simulator/dca", response_model=DCAResp)
-async def dca_simulator(req: DCAReq):
+async def dca_simulator(req: DCAReq) -> DCAResp:
     monthly_rate = (req.apy_percent / 100.0) / 12.0
     months = req.years * 12
     value = 0.0
@@ -656,7 +683,7 @@ async def dca_simulator(req: DCAReq):
 
 # ---------- Health ----------
 @api_router.get("/")
-async def root():
+async def root() -> dict:
     return {"app": "Autopilot - Passive Income OS", "status": "ok"}
 
 
@@ -673,5 +700,5 @@ app.add_middleware(
 
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
+async def shutdown_db_client() -> None:
     client.close()
