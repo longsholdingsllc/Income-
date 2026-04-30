@@ -5,6 +5,7 @@ import { CheckCircle2, Loader2, XCircle, ArrowRight } from "lucide-react";
 
 const MAX_POLLS = 10;
 const INTERVAL_MS = 2000;
+const SANDBOX_FALLBACK_AFTER = 3; // after N stuck polls, try sandbox confirm
 
 export default function BillingSuccess() {
   const loc = useLocation();
@@ -12,12 +13,26 @@ export default function BillingSuccess() {
   const [state, setState] = useState("polling"); // polling | paid | expired | failed
   const [message, setMessage] = useState("Checking your payment…");
   const attempts = useRef(0);
+  const sandboxTried = useRef(false);
 
   useEffect(() => {
     const sid = new URLSearchParams(loc.search).get("session_id");
     if (!sid) { setState("failed"); setMessage("No session id"); return; }
 
     let cancelled = false;
+
+    const trySandboxConfirm = async () => {
+      // Only call once; only if server indicates sandbox mode
+      try {
+        const { data: me } = await api.get("/billing/me");
+        if (!me.sandbox_mode) return false;
+        await api.post(`/billing/dev/confirm/${sid}`);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     const poll = async () => {
       if (cancelled) return;
       if (attempts.current >= MAX_POLLS) {
@@ -38,7 +53,19 @@ export default function BillingSuccess() {
           setMessage("Your payment session expired.");
           return;
         }
-        setMessage("Payment processing…");
+        // Stuck in 'initiated' — sandbox fallback (upstream Stripe sandbox quirk)
+        if (attempts.current >= SANDBOX_FALLBACK_AFTER && !sandboxTried.current) {
+          sandboxTried.current = true;
+          setMessage("Finalizing payment…");
+          const ok = await trySandboxConfirm();
+          if (ok && !cancelled) {
+            setState("paid");
+            setMessage("Welcome to Pro. Unlimited AI is unlocked.");
+            return;
+          }
+        } else {
+          setMessage("Payment processing…");
+        }
         setTimeout(poll, INTERVAL_MS);
       } catch (e) {
         setTimeout(poll, INTERVAL_MS);

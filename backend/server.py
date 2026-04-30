@@ -578,6 +578,7 @@ class BillingStatus(BaseModel):
     pro_until: Optional[str] = None
     ai_calls_used_this_month: int
     ai_calls_limit: int  # -1 means unlimited
+    sandbox_mode: bool = False
 
 
 @api_router.get("/billing/me", response_model=BillingStatus)
@@ -592,6 +593,7 @@ async def billing_me(user: dict = Depends(get_current_user)) -> BillingStatus:
         pro_until=pro_until if is_pro else None,
         ai_calls_used_this_month=used,
         ai_calls_limit=-1 if is_pro else FREE_AI_QUOTA_PER_MONTH,
+        sandbox_mode=SANDBOX_MODE,
     )
 
 
@@ -684,21 +686,7 @@ async def billing_status(session_id: str, request: Request, user: dict = Depends
 
     # On first successful payment, extend user's pro_until
     if cs.payment_status == "paid" and not tx.get("credit_applied"):
-        pkg = PACKAGES[tx["package_id"]]
-        # Extend from max(now, existing pro_until)
-        user_doc = await db.users.find_one({"id": user["id"]}, {"_id": 0})
-        base = now_utc()
-        if user_doc and user_doc.get("pro_until"):
-            try:
-                existing = datetime.fromisoformat(user_doc["pro_until"].replace("Z", "+00:00"))
-                if existing.tzinfo is None:
-                    existing = existing.replace(tzinfo=timezone.utc)
-                if existing > base:
-                    base = existing
-            except Exception:
-                pass
-        new_until = base + timedelta(days=int(pkg["grants_days"]))
-        await db.users.update_one({"id": user["id"]}, {"$set": {"pro_until": iso(new_until)}})
+        await _grant_pro(user["id"], tx["package_id"])
         updates["credit_applied"] = True
 
     await db.payment_transactions.update_one({"session_id": session_id}, {"$set": updates})
@@ -708,6 +696,55 @@ async def billing_status(session_id: str, request: Request, user: dict = Depends
         "amount_total": int(cs.amount_total),
         "currency": cs.currency,
     }
+
+
+SANDBOX_MODE = STRIPE_API_KEY.startswith("sk_test_")
+
+
+async def _grant_pro(user_id: str, package_id: str) -> str:
+    """Idempotent: extend pro_until for a user based on package grants_days."""
+    pkg = PACKAGES[package_id]
+    user_doc = await db.users.find_one({"id": user_id}, {"_id": 0})
+    base = now_utc()
+    if user_doc and user_doc.get("pro_until"):
+        try:
+            existing = datetime.fromisoformat(user_doc["pro_until"].replace("Z", "+00:00"))
+            if existing.tzinfo is None:
+                existing = existing.replace(tzinfo=timezone.utc)
+            if existing > base:
+                base = existing
+        except Exception:
+            pass
+    new_until = base + timedelta(days=int(pkg["grants_days"]))
+    await db.users.update_one({"id": user_id}, {"$set": {"pro_until": iso(new_until)}})
+    return iso(new_until)
+
+
+@api_router.post("/billing/dev/confirm/{session_id}")
+async def billing_dev_confirm(session_id: str, user: dict = Depends(get_current_user)) -> dict:
+    """Sandbox-only fallback: confirm a payment when the upstream Stripe proxy's
+    read-path is unavailable (returns 404 for just-created sessions in the emergent
+    sandbox). Marks the transaction paid and grants Pro. Gated strictly to test keys
+    AND to the transaction's owning user."""
+    if not SANDBOX_MODE:
+        raise HTTPException(status_code=404, detail="Not available")
+    tx = await db.payment_transactions.find_one({"session_id": session_id, "user_id": user["id"]}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if tx.get("credit_applied"):
+        return {"payment_status": "paid", "credit_applied": True, "pro_until": None}
+    pro_until = await _grant_pro(user["id"], tx["package_id"])
+    await db.payment_transactions.update_one(
+        {"session_id": session_id},
+        {"$set": {
+            "payment_status": "paid",
+            "status": "complete",
+            "credit_applied": True,
+            "confirmed_via": "sandbox_dev_endpoint",
+            "updated_at": iso(now_utc()),
+        }},
+    )
+    return {"payment_status": "paid", "credit_applied": True, "pro_until": pro_until}
 
 
 @api_router.post("/webhook/stripe")
@@ -737,21 +774,8 @@ async def stripe_webhook(request: Request) -> dict:
         "updated_at": iso(now_utc()),
     }
     if resp.payment_status == "paid" and not tx.get("credit_applied"):
-        pkg = PACKAGES.get(tx["package_id"])
-        if pkg:
-            user_doc = await db.users.find_one({"id": tx["user_id"]}, {"_id": 0})
-            base = now_utc()
-            if user_doc and user_doc.get("pro_until"):
-                try:
-                    existing = datetime.fromisoformat(user_doc["pro_until"].replace("Z", "+00:00"))
-                    if existing.tzinfo is None:
-                        existing = existing.replace(tzinfo=timezone.utc)
-                    if existing > base:
-                        base = existing
-                except Exception:
-                    pass
-            new_until = base + timedelta(days=int(pkg["grants_days"]))
-            await db.users.update_one({"id": tx["user_id"]}, {"$set": {"pro_until": iso(new_until)}})
+        if tx["package_id"] in PACKAGES:
+            await _grant_pro(tx["user_id"], tx["package_id"])
             updates["credit_applied"] = True
     await db.payment_transactions.update_one({"session_id": resp.session_id}, {"$set": updates})
     return {"received": True}
