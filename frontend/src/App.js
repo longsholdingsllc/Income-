@@ -13,6 +13,8 @@ import Content from "./pages/Content";
 import Simulator from "./pages/Simulator";
 import Coach from "./pages/Coach";
 import Goals from "./pages/Goals";
+import Pricing from "./pages/Pricing";
+import BillingSuccess from "./pages/BillingSuccess";
 
 function Protected({ children }) {
   const { user } = useAuth();
@@ -36,6 +38,8 @@ export default function App() {
             <Route path="simulator" element={<Simulator />} />
             <Route path="coach" element={<Coach />} />
             <Route path="goals" element={<Goals />} />
+            <Route path="pricing" element={<Pricing />} />
+            <Route path="billing/success" element={<BillingSuccess />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -83,8 +83,8 @@ export default function Dashboard() {
               <div className="text-xs text-[#A3B3AA]">Passive income trend</div>
             </div>
           </div>
-          <div style={{ width: "100%", height: 260 }}>
-            <ResponsiveContainer>
+          <div className="w-full min-h-[260px]" style={{ height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.trend}>
                 <CartesianGrid stroke="#173627" vertical={false} />
                 <XAxis dataKey="month" stroke="#A3B3AA" fontSize={12} />
@@ -105,8 +105,8 @@ export default function Dashboard() {
           {pieData.length === 0 ? (
             <div className="text-sm text-[#A3B3AA] py-12 text-center">Log an income entry to see the mix.</div>
           ) : (
-            <div style={{ width: "100%", height: 260 }}>
-              <ResponsiveContainer>
+            <div className="w-full min-h-[260px]" style={{ height: 260 }}>
+              <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={pieData} innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="value">
                     {pieData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}

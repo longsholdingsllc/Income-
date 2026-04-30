@@ -51,7 +51,14 @@ export default function Coach() {
       setMessages((m) => [...m, { role: "assistant", content: data.reply, created_at: new Date().toISOString() }]);
       loadSessions();
     } catch (e) {
-      setMessages((m) => [...m, { role: "assistant", content: "Coach is unavailable right now. Try again in a moment.", created_at: new Date().toISOString() }]);
+      const status = e.response?.status;
+      const detail = e.response?.data?.detail || "Coach is unavailable right now. Try again in a moment.";
+      const friendly = status === 402
+        ? `${detail} Upgrade to Pro for unlimited coaching.`
+        : (status === 502 || status === 503 || status === 504)
+          ? "Our AI is briefly throttled. Please try again in ~30 seconds."
+          : detail;
+      setMessages((m) => [...m, { role: "assistant", content: friendly, created_at: new Date().toISOString() }]);
     } finally { setSending(false); }
   };
 

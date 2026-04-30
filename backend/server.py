@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -17,6 +17,9 @@ from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.payments.stripe.checkout import (
+    StripeCheckout, CheckoutSessionRequest,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -29,9 +32,23 @@ db = client[os.environ['DB_NAME']]
 # Config
 EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
 JWT_SECRET = os.environ['JWT_SECRET']
+STRIPE_API_KEY = os.environ['STRIPE_API_KEY']
 JWT_ALGO = "HS256"
 JWT_EXP_DAYS = 14
 CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
+
+# Pricing packages — server-side only (NEVER accept price from frontend)
+PACKAGES = {
+    "pro_monthly": {
+        "name": "Autopilot Pro (30 days)",
+        "amount": 9.00,
+        "currency": "usd",
+        "grants_days": 30,
+    },
+}
+
+# Free tier quota: total AI calls per month across ideas + content + coach
+FREE_AI_QUOTA_PER_MONTH = 5
 
 app = FastAPI(title="Autopilot - Passive Income OS")
 api_router = APIRouter(prefix="/api")
@@ -124,6 +141,17 @@ class StreamOut(StreamCreate):
     user_id: str
     created_at: str
     total_earned: float = 0.0
+
+
+class StreamUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    category: Optional[Literal[
+        "affiliate", "dividends", "rentals", "digital_products",
+        "crypto_staking", "print_on_demand", "royalties", "interest", "ads", "other"
+    ]] = None
+    initial_investment: Optional[float] = None
+    monthly_estimate: Optional[float] = None
+    notes: Optional[str] = None
 
 
 class EntryCreate(BaseModel):
@@ -305,6 +333,23 @@ async def list_streams(user: dict = Depends(get_current_user)) -> List[StreamOut
     return result
 
 
+@api_router.patch("/streams/{stream_id}", response_model=StreamOut)
+async def update_stream(stream_id: str, req: StreamUpdate, user: dict = Depends(get_current_user)) -> StreamOut:
+    existing = await db.streams.find_one({"id": stream_id, "user_id": user["id"]}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Stream not found")
+    updates = {k: v for k, v in req.model_dump(exclude_unset=True).items() if v is not None}
+    if updates:
+        await db.streams.update_one({"id": stream_id, "user_id": user["id"]}, {"$set": updates})
+    fresh = await db.streams.find_one({"id": stream_id, "user_id": user["id"]}, {"_id": 0})
+    agg = await db.entries.aggregate([
+        {"$match": {"stream_id": stream_id, "user_id": user["id"]}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(1)
+    fresh["total_earned"] = float(agg[0]["total"]) if agg else 0.0
+    return StreamOut(**fresh)
+
+
 @api_router.delete("/streams/{stream_id}")
 async def delete_stream(stream_id: str, user: dict = Depends(get_current_user)) -> dict:
     res = await db.streams.delete_one({"id": stream_id, "user_id": user["id"]})
@@ -481,6 +526,217 @@ async def upsert_goal(req: GoalUpsert, user: dict = Depends(get_current_user)) -
     return GoalOut(**doc)
 
 
+# ---------- Billing (Stripe) & Pro Quota ----------
+async def _is_pro_active(user_id: str) -> tuple[bool, Optional[str]]:
+    """Return (is_pro, pro_until_iso). Pro is active if pro_until > now."""
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "pro_until": 1})
+    pro_until = user.get("pro_until") if user else None
+    if not pro_until:
+        return False, None
+    try:
+        dt = datetime.fromisoformat(pro_until.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt > now_utc(), pro_until
+    except Exception:
+        return False, pro_until
+
+
+async def _ai_quota_check_and_increment(user_id: str) -> None:
+    """Gate AI calls: Pro unlimited; Free = FREE_AI_QUOTA_PER_MONTH per calendar month."""
+    is_pro, _ = await _is_pro_active(user_id)
+    if is_pro:
+        return
+    now = now_utc()
+    key = f"{now.year}-{now.month:02d}"
+    rec = await db.ai_usage.find_one({"user_id": user_id, "month": key}, {"_id": 0})
+    used = int(rec["count"]) if rec else 0
+    if used >= FREE_AI_QUOTA_PER_MONTH:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Free tier limit reached ({FREE_AI_QUOTA_PER_MONTH}/mo). Upgrade to Pro for unlimited AI.",
+        )
+    await db.ai_usage.update_one(
+        {"user_id": user_id, "month": key},
+        {"$inc": {"count": 1}, "$set": {"updated_at": iso(now)}},
+        upsert=True,
+    )
+
+
+class CheckoutReq(BaseModel):
+    package_id: Literal["pro_monthly"]
+    origin_url: str
+
+
+class CheckoutResp(BaseModel):
+    url: str
+    session_id: str
+
+
+class BillingStatus(BaseModel):
+    is_pro: bool
+    pro_until: Optional[str] = None
+    ai_calls_used_this_month: int
+    ai_calls_limit: int  # -1 means unlimited
+
+
+@api_router.get("/billing/me", response_model=BillingStatus)
+async def billing_me(user: dict = Depends(get_current_user)) -> BillingStatus:
+    is_pro, pro_until = await _is_pro_active(user["id"])
+    now = now_utc()
+    key = f"{now.year}-{now.month:02d}"
+    rec = await db.ai_usage.find_one({"user_id": user["id"], "month": key}, {"_id": 0})
+    used = int(rec["count"]) if rec else 0
+    return BillingStatus(
+        is_pro=is_pro,
+        pro_until=pro_until if is_pro else None,
+        ai_calls_used_this_month=used,
+        ai_calls_limit=-1 if is_pro else FREE_AI_QUOTA_PER_MONTH,
+    )
+
+
+@api_router.post("/billing/checkout", response_model=CheckoutResp)
+async def billing_checkout(req: CheckoutReq, request: Request, user: dict = Depends(get_current_user)) -> CheckoutResp:
+    pkg = PACKAGES.get(req.package_id)
+    if not pkg:
+        raise HTTPException(status_code=400, detail="Invalid package")
+
+    host_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{host_url}/api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+
+    origin = req.origin_url.rstrip("/")
+    success_url = f"{origin}/app/billing/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/app/pricing"
+
+    metadata = {
+        "user_id": user["id"],
+        "user_email": user["email"],
+        "package_id": req.package_id,
+    }
+    checkout_req = CheckoutSessionRequest(
+        amount=float(pkg["amount"]),
+        currency=pkg["currency"],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata=metadata,
+    )
+    session_resp = await stripe_checkout.create_checkout_session(checkout_req)
+
+    # Create payment_transactions record BEFORE redirect
+    await db.payment_transactions.insert_one({
+        "id": str(uuid.uuid4()),
+        "session_id": session_resp.session_id,
+        "user_id": user["id"],
+        "user_email": user["email"],
+        "package_id": req.package_id,
+        "amount": float(pkg["amount"]),
+        "currency": pkg["currency"],
+        "payment_status": "initiated",
+        "status": "open",
+        "metadata": metadata,
+        "created_at": iso(now_utc()),
+        "updated_at": iso(now_utc()),
+    })
+    return CheckoutResp(url=session_resp.url, session_id=session_resp.session_id)
+
+
+@api_router.get("/billing/status/{session_id}")
+async def billing_status(session_id: str, request: Request, user: dict = Depends(get_current_user)) -> dict:
+    tx = await db.payment_transactions.find_one({"session_id": session_id, "user_id": user["id"]}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # If already finalized, return cached status (idempotent — never grant credit twice)
+    if tx.get("payment_status") == "paid" and tx.get("credit_applied"):
+        return {"payment_status": tx["payment_status"], "status": tx["status"], "amount_total": int(tx["amount"] * 100)}
+
+    host_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{host_url}/api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+    cs = await stripe_checkout.get_checkout_status(session_id)
+
+    # Persist status
+    updates = {
+        "payment_status": cs.payment_status,
+        "status": cs.status,
+        "amount_total": int(cs.amount_total),
+        "currency": cs.currency,
+        "updated_at": iso(now_utc()),
+    }
+
+    # On first successful payment, extend user's pro_until
+    if cs.payment_status == "paid" and not tx.get("credit_applied"):
+        pkg = PACKAGES[tx["package_id"]]
+        # Extend from max(now, existing pro_until)
+        user_doc = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+        base = now_utc()
+        if user_doc and user_doc.get("pro_until"):
+            try:
+                existing = datetime.fromisoformat(user_doc["pro_until"].replace("Z", "+00:00"))
+                if existing.tzinfo is None:
+                    existing = existing.replace(tzinfo=timezone.utc)
+                if existing > base:
+                    base = existing
+            except Exception:
+                pass
+        new_until = base + timedelta(days=int(pkg["grants_days"]))
+        await db.users.update_one({"id": user["id"]}, {"$set": {"pro_until": iso(new_until)}})
+        updates["credit_applied"] = True
+
+    await db.payment_transactions.update_one({"session_id": session_id}, {"$set": updates})
+    return {
+        "payment_status": cs.payment_status,
+        "status": cs.status,
+        "amount_total": int(cs.amount_total),
+        "currency": cs.currency,
+    }
+
+
+@api_router.post("/webhook/stripe")
+async def stripe_webhook(request: Request) -> dict:
+    host_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{host_url}/api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+    body = await request.body()
+    signature = request.headers.get("Stripe-Signature", "")
+    try:
+        resp = await stripe_checkout.handle_webhook(body, signature)
+    except Exception as e:
+        logger.exception("stripe webhook verification failed")
+        raise HTTPException(status_code=400, detail=f"Invalid webhook: {str(e)[:200]}")
+
+    # Update the transaction and grant Pro if applicable
+    tx = await db.payment_transactions.find_one({"session_id": resp.session_id}, {"_id": 0})
+    if not tx:
+        return {"received": True}
+    updates = {
+        "payment_status": resp.payment_status,
+        "event_type": resp.event_type,
+        "event_id": resp.event_id,
+        "updated_at": iso(now_utc()),
+    }
+    if resp.payment_status == "paid" and not tx.get("credit_applied"):
+        pkg = PACKAGES.get(tx["package_id"])
+        if pkg:
+            user_doc = await db.users.find_one({"id": tx["user_id"]}, {"_id": 0})
+            base = now_utc()
+            if user_doc and user_doc.get("pro_until"):
+                try:
+                    existing = datetime.fromisoformat(user_doc["pro_until"].replace("Z", "+00:00"))
+                    if existing.tzinfo is None:
+                        existing = existing.replace(tzinfo=timezone.utc)
+                    if existing > base:
+                        base = existing
+                except Exception:
+                    pass
+            new_until = base + timedelta(days=int(pkg["grants_days"]))
+            await db.users.update_one({"id": tx["user_id"]}, {"$set": {"pro_until": iso(new_until)}})
+            updates["credit_applied"] = True
+    await db.payment_transactions.update_one({"session_id": resp.session_id}, {"$set": updates})
+    return {"received": True}
+
+
 # ---------- AI Idea Generator ----------
 def _extract_json(text: str):
     # Try to extract JSON object/array from Claude's response
@@ -509,6 +765,7 @@ def _extract_json(text: str):
 
 @api_router.post("/ai/ideas", response_model=IdeaResp)
 async def generate_ideas(req: IdeaReq, user: dict = Depends(get_current_user)) -> IdeaResp:
+    await _ai_quota_check_and_increment(user["id"])
     system_msg = (
         "You are a world-class passive income strategist. Generate specific, realistic, and actionable "
         "passive income ideas tailored to the user's profile. Respond ONLY with valid JSON matching "
@@ -544,6 +801,7 @@ async def generate_ideas(req: IdeaReq, user: dict = Depends(get_current_user)) -
 # ---------- AI Content Generator ----------
 @api_router.post("/ai/content", response_model=ContentResp)
 async def generate_content(req: ContentReq, user: dict = Depends(get_current_user)) -> ContentResp:
+    await _ai_quota_check_and_increment(user["id"])
     system_msg = (
         "You are an expert SEO copywriter who writes affiliate-friendly blog posts that rank. "
         "Respond ONLY with valid JSON (no prose, no markdown fences) matching the schema: "
@@ -583,6 +841,7 @@ COACH_SYSTEM = (
 
 @api_router.post("/ai/coach/chat", response_model=CoachResp)
 async def coach_chat(req: CoachReq, user: dict = Depends(get_current_user)) -> CoachResp:
+    await _ai_quota_check_and_increment(user["id"])
     # Create or load session
     session_id = req.session_id
     if not session_id:

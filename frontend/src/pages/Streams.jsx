@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { motion } from "framer-motion";
-import { Plus, Trash2, Banknote, X } from "lucide-react";
+import { Plus, Trash2, Banknote, X, Pencil } from "lucide-react";
 
 const CATEGORIES = [
   ["affiliate", "Affiliate"],
@@ -22,6 +22,7 @@ export default function Streams() {
   const [streams, setStreams] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: "", category: "affiliate", initial_investment: 0, monthly_estimate: 0, notes: "" });
   const [logTarget, setLogTarget] = useState(null);
   const [logForm, setLogForm] = useState({ amount: "", note: "" });
@@ -32,10 +33,38 @@ export default function Streams() {
   };
   useEffect(load, []);
 
-  const createStream = async (e) => {
+  const openCreate = () => {
+    setEditingId(null);
+    setForm({ name: "", category: "affiliate", initial_investment: 0, monthly_estimate: 0, notes: "" });
+    setShowForm(true);
+  };
+
+  const openEdit = (s) => {
+    setEditingId(s.id);
+    setForm({
+      name: s.name,
+      category: s.category,
+      initial_investment: s.initial_investment ?? 0,
+      monthly_estimate: s.monthly_estimate ?? 0,
+      notes: s.notes || "",
+    });
+    setShowForm(true);
+  };
+
+  const saveStream = async (e) => {
     e.preventDefault();
-    await api.post("/streams", { ...form, initial_investment: Number(form.initial_investment), monthly_estimate: Number(form.monthly_estimate) });
+    const payload = {
+      ...form,
+      initial_investment: Number(form.initial_investment),
+      monthly_estimate: Number(form.monthly_estimate),
+    };
+    if (editingId) {
+      await api.patch(`/streams/${editingId}`, payload);
+    } else {
+      await api.post("/streams", payload);
+    }
     setShowForm(false);
+    setEditingId(null);
     setForm({ name: "", category: "affiliate", initial_investment: 0, monthly_estimate: 0, notes: "" });
     load();
   };
@@ -61,7 +90,7 @@ export default function Streams() {
           <div className="text-xs uppercase tracking-[0.2em] text-[#00D084] mb-2">Your portfolio</div>
           <h1 className="font-serif text-4xl sm:text-5xl tracking-tighter">Income streams</h1>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn-primary" data-testid="open-add-stream-btn">
+        <button onClick={openCreate} className="btn-primary" data-testid="open-add-stream-btn">
           <Plus size={16} /> Add stream
         </button>
       </div>
@@ -72,7 +101,7 @@ export default function Streams() {
         <div className="card p-12 text-center" data-testid="streams-empty">
           <div className="font-serif text-3xl mb-2">No streams yet</div>
           <div className="text-[#A3B3AA] mb-6">Add your first passive income source to start tracking.</div>
-          <button onClick={() => setShowForm(true)} className="btn-primary" data-testid="empty-add-stream-btn">
+          <button onClick={openCreate} className="btn-primary" data-testid="empty-add-stream-btn">
             <Plus size={16} /> Create first stream
           </button>
         </div>
@@ -91,9 +120,14 @@ export default function Streams() {
                   <span className="chip">{CATEGORIES.find(c => c[0] === s.category)?.[1] || s.category}</span>
                   <h3 className="font-sans text-xl font-semibold mt-3">{s.name}</h3>
                 </div>
-                <button onClick={() => del(s.id)} className="text-[#A3B3AA] hover:text-[#EF4444]" data-testid={`delete-stream-${s.id}`}>
-                  <Trash2 size={16} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => openEdit(s)} className="text-[#A3B3AA] hover:text-[#00D084]" data-testid={`edit-stream-${s.id}`}>
+                    <Pencil size={16} />
+                  </button>
+                  <button onClick={() => del(s.id)} className="text-[#A3B3AA] hover:text-[#EF4444]" data-testid={`delete-stream-${s.id}`}>
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
               <div className="mt-2">
                 <div className="text-xs uppercase tracking-[0.15em] text-[#A3B3AA]">Total earned</div>
@@ -118,18 +152,18 @@ export default function Streams() {
         </div>
       )}
 
-      {/* Add Stream Modal */}
+      {/* Add/Edit Stream Modal */}
       {showForm && (
-        <div className="fixed inset-0 z-30 bg-black/70 grid place-items-center p-4" onClick={() => setShowForm(false)}>
+        <div className="fixed inset-0 z-30 bg-black/70 grid place-items-center p-4" onClick={() => { setShowForm(false); setEditingId(null); }}>
           <form
-            onSubmit={createStream}
+            onSubmit={saveStream}
             onClick={(e) => e.stopPropagation()}
             className="card p-8 w-full max-w-lg"
             data-testid="add-stream-form"
           >
             <div className="flex items-center justify-between mb-6">
-              <h2 className="font-serif text-3xl tracking-tighter">New stream</h2>
-              <button type="button" onClick={() => setShowForm(false)} className="text-[#A3B3AA] hover:text-[#F4F0E6]" data-testid="close-add-stream-btn"><X size={20} /></button>
+              <h2 className="font-serif text-3xl tracking-tighter">{editingId ? "Edit stream" : "New stream"}</h2>
+              <button type="button" onClick={() => { setShowForm(false); setEditingId(null); }} className="text-[#A3B3AA] hover:text-[#F4F0E6]" data-testid="close-add-stream-btn"><X size={20} /></button>
             </div>
 
             <label className="label">Name</label>
@@ -154,7 +188,7 @@ export default function Streams() {
             <label className="label mt-4">Notes</label>
             <textarea className="input mb-6" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} data-testid="stream-notes-input" />
 
-            <button className="btn-primary w-full justify-center" data-testid="submit-stream-btn">Create stream</button>
+            <button className="btn-primary w-full justify-center" data-testid="submit-stream-btn">{editingId ? "Save changes" : "Create stream"}</button>
           </form>
         </div>
       )}

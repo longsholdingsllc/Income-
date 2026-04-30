@@ -1,22 +1,23 @@
 import React, { useState } from "react";
 import { api } from "../lib/api";
 import { Copy, FileText, Sparkles, Check } from "lucide-react";
+import { AIError } from "../components/AIError";
 
 export default function Content() {
   const [form, setForm] = useState({ niche: "", keywords: "", target_audience: "", affiliate_product: "" });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState(null);
   const [copied, setCopied] = useState(false);
 
   const submit = async (e) => {
-    e.preventDefault();
-    setErr(""); setResult(null); setLoading(true);
+    if (e) e.preventDefault();
+    setErr(null); setResult(null); setLoading(true);
     try {
       const { data } = await api.post("/ai/content", form);
       setResult(data);
     } catch (e2) {
-      setErr(e2.response?.data?.detail || "Generation failed");
+      setErr(e2);
     } finally { setLoading(false); }
   };
 
@@ -57,7 +58,7 @@ export default function Content() {
         <button className="btn-primary mt-6" disabled={loading} data-testid="content-generate-btn">
           <Sparkles size={16} /> {loading ? "Writing…" : "Generate post"}
         </button>
-        {err && <div className="text-[#EF4444] text-sm mt-4" data-testid="content-error">{err}</div>}
+        {err && <div className="mt-4"><AIError error={err} onRetry={() => submit()} testIdPrefix="content-error" /></div>}
       </form>
 
       {result && (

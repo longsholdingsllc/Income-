@@ -1,7 +1,7 @@
 import React from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { LayoutDashboard, Wallet, Lightbulb, FileText, LineChart, Bot, Target, LogOut } from "lucide-react";
+import { LayoutDashboard, Wallet, Lightbulb, FileText, LineChart, Bot, Target, LogOut, Sparkles } from "lucide-react";
 
 const NAV = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true, tid: "nav-dashboard" },
@@ -11,6 +11,7 @@ const NAV = [
   { to: "/app/simulator", label: "Simulator", icon: LineChart, tid: "nav-simulator" },
   { to: "/app/coach", label: "AI Coach", icon: Bot, tid: "nav-coach" },
   { to: "/app/goals", label: "Goals", icon: Target, tid: "nav-goals" },
+  { to: "/app/pricing", label: "Upgrade", icon: Sparkles, tid: "nav-pricing" },
 ];
 
 export default function AppLayout() {

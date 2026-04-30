@@ -2,23 +2,24 @@ import React, { useState } from "react";
 import { api } from "../lib/api";
 import { motion } from "framer-motion";
 import { Sparkles, Clock, DollarSign, AlertTriangle, Wrench, ArrowRight } from "lucide-react";
+import { AIError } from "../components/AIError";
 
 export default function Ideas() {
   const [form, setForm] = useState({ skills: "", budget_usd: 500, hours_per_week: 5, risk_tolerance: "medium", interests: "" });
   const [ideas, setIdeas] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState(null);
 
   const submit = async (e) => {
-    e.preventDefault();
-    setErr(""); setIdeas([]); setLoading(true);
+    if (e) e.preventDefault();
+    setErr(null); setIdeas([]); setLoading(true);
     try {
       const { data } = await api.post("/ai/ideas", {
         ...form, budget_usd: Number(form.budget_usd), hours_per_week: Number(form.hours_per_week)
       });
       setIdeas(data.ideas || []);
     } catch (e2) {
-      setErr(e2.response?.data?.detail || "Generation failed");
+      setErr(e2);
     } finally { setLoading(false); }
   };
 
@@ -60,7 +61,7 @@ export default function Ideas() {
         <button className="btn-primary mt-6" disabled={loading} data-testid="ideas-generate-btn">
           <Sparkles size={16} /> {loading ? "Brewing ideas…" : "Generate 5 ideas"}
         </button>
-        {err && <div className="text-[#EF4444] text-sm mt-4" data-testid="ideas-error">{err}</div>}
+        {err && <div className="mt-4"><AIError error={err} onRetry={() => submit()} testIdPrefix="ideas-error" /></div>}
       </form>
 
       {ideas.length > 0 && (
