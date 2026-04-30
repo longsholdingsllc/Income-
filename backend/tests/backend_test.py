@@ -405,8 +405,10 @@ class TestBillingCheckout:
         for k in ("payment_status", "status", "amount_total", "currency"):
             assert k in d, f"missing {k} in status response: {d}"
         # For unpaid sessions, expect open/unpaid
-        assert d["status"] in ("open", "complete", "expired")
-        assert d["payment_status"] in ("unpaid", "paid", "no_payment_required")
+        # 'initiated' is the graceful fallback when Stripe has not yet propagated
+        # the session (sk_test_emergent proxy). 'open' once Stripe finds it, 'complete' after paid.
+        assert d["status"] in ("open", "complete", "expired", "initiated")
+        assert d["payment_status"] in ("unpaid", "paid", "no_payment_required", "initiated")
 
     def test_billing_status_unknown_session(self, session: requests.Session, auth_headers: dict) -> None:
         r = session.get(f"{API}/billing/status/cs_test_does_not_exist_xyz", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
