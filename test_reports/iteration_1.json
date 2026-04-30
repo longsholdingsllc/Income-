@@ -1,0 +1,53 @@
+{
+  "summary": "First testing iteration for Autopilot Passive Income OS MVP. Backend: 26/26 tests passing (after running Coach class in isolation due to transient EMERGENT_LLM_KEY budget cap when 3 large AI calls fired back-to-back). Frontend: critical flows (landing, register, sidebar nav across all 7 pages, streams CRUD + log income, dashboard metrics, simulator, goals upsert+persist, logout) all working. AI integrations (Claude Sonnet 4.5 via emergentintegrations) producing valid JSON for Ideas, Content, and multi-turn Coach memory. Stream creation, entry logging, and total_earned aggregation work end-to-end. data-testid coverage is excellent throughout the app.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/ai/coach/chat (also affects /api/ai/ideas, /api/ai/content)",
+        "issue": "EMERGENT_LLM_KEY hit a transient per-minute/per-key budget cap when ideas + content + coach were called back-to-back in the same pytest run (litellm error: 'Budget has been exceeded! Current cost: 0.031833, Max budget: 0.001'). Re-running the Coach tests in isolation 30s later passed cleanly. Code is correct; this is a budget/throttling characteristic of the shared key, not a bug. Recommend either: (a) spacing AI calls in test runner with sleeps, or (b) noting in user docs that very rapid consecutive AI calls may briefly throttle."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Dashboard (and any page rendering charts when chart container is briefly 0px during mount)",
+        "issues": [
+          "Recharts console warning: 'The width(-1) and height(-1) of chart should be greater than 0'. Cosmetic — charts render correctly after layout settles. Could be silenced by setting min-h-[200px] on ResponsiveContainer parent or wrapping with explicit aspect ratio. Not blocking."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: silence Recharts width/height warnings by giving chart containers an explicit min-height (e.g. min-h-[260px]) on the parent wrapping <ResponsiveContainer>.",
+    "Optional: consider adding a small backoff/retry on 502 from /api/ai/* endpoints in the frontend (Ideas/Content/Coach pages) so transient EMERGENT_LLM_KEY budget hits surface a friendlier message rather than a raw error.",
+    "Nothing is blocking. Backend & all critical user flows verified working."
+  ],
+  "critical_code_review_comments": [
+    "server.py (677 lines) is approaching the 700-line guideline; consider splitting into modules (auth.py, streams.py, ai.py, simulator.py) before adding more features.",
+    "JWT_SECRET in /app/backend/.env is a placeholder ('change-me-in-production-...'). Acceptable for MVP but flag for production hardening.",
+    "DCA simulator's series sampling formula `m % max(1, months // 60)` produces uneven point counts for small `years` (e.g., years=1 yields all 12 months; years=5 yields 60 points). Works but slightly non-uniform — consider always returning ~60 evenly-spaced samples.",
+    "Coach chat persists user message BEFORE LLM call; if LLM 502s, the user message is stored but no assistant reply — sessions list will show orphaned user-only turns. Consider transactional persist-after-reply or marking pending state.",
+    "Excellent: all endpoints use Pydantic validation, _id is excluded everywhere, all UUIDs are strings, all collections use user_id scoping, and frontend uses REACT_APP_BACKEND_URL via axios baseURL with Bearer interceptor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (26/26 when retried; 22/26 84.6% in single-pass due to EMERGENT_LLM_KEY budget cap)",
+    "frontend": "100% (8/8 critical flows: landing, register, nav, streams CRUD, log-income, dashboard, simulator, goals, logout)"
+  },
+  "test_credentials": "Created fresh users via /api/auth/register with pattern test+<timestamp>_<rand>@autopilot.io / TestPass123! Existing user demo@autopilot.io / demo123 was not used to keep tests isolated.",
+  "seed_data_creation": "Each test run creates one TEST_ user, one TEST_ stream ('TEST_Affiliate Blog' + 'TEST_UI Affiliate'), and 2-3 TEST_ entries. Stream is deleted via TestZCleanup. UI test users + remaining streams are not auto-deleted (no cascade-user delete endpoint exists).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend regression tests live at /app/backend/tests/backend_test.py — run with `pytest /app/backend/tests/backend_test.py -v --junitxml=/app/test_reports/pytest/pytest_results.xml`. If AI tests fail with 502/'Budget has been exceeded', wait 30s and re-run the failing class in isolation (e.g., `pytest backend/tests/backend_test.py::TestAICoach`). The EMERGENT_LLM_KEY can briefly throttle when 3 multi-thousand-token Claude calls fire within ~60s. All flows verified Jan 2026 against https://income-automation-21.preview.emergentagent.com.",
+  "rca_of_the_issue": "AI test failures: root cause is transient budget exhaustion of the shared EMERGENT_LLM_KEY (litellm reports 'Max budget: 0.001' which appears to be a per-minute soft cap that resets quickly). Reproduced by running 3 AI endpoints sequentially; mitigated by spacing calls or running in isolation. No code change required."
+}
