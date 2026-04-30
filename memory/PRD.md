@@ -30,6 +30,21 @@ email/password. Design: distinctive deep-forest-green premium wealth-OS (no purp
 - All API routes prefixed with `/api`. Frontend uses `REACT_APP_BACKEND_URL`.
 - Theme: Deep Forest Green dark mode. Cormorant Garamond (serif) + Chivo (sans) + JetBrains Mono.
 
+## Iteration 2 — Stripe Pro tier + P1 polish (2026-04-30)
+- **Stripe Pro tier** ($9 / 30 days) via emergentintegrations: `/api/billing/checkout`,
+  `/api/billing/status/{session_id}` (graceful fallback if SDK can't find session yet),
+  `/api/billing/me` (status + quota), `/api/webhook/stripe` (quiet 400 for missing sig).
+  Frontend: `/app/pricing` page, `/app/billing/success` polling page, Upgrade nav link.
+- **Free-tier quota**: 5 AI calls/month across ideas+content+coach combined. 402 with
+  upgrade CTA when exceeded. Pro users (pro_until > now) bypass quota entirely.
+- **Edit-stream**: `PATCH /api/streams/{id}` + pencil icon in Streams UI (reuses modal).
+- **Friendlier AI errors**: new `<AIError>` component — distinguishes 402 (quota → upgrade),
+  5xx (transient → retry), other → generic with retry. Wired into Ideas, Content, Coach.
+- **Recharts fix**: `min-h-[260px]` on parents + `minHeight/minWidth/debounce` props on
+  every ResponsiveContainer.
+- Tested: HIGH bug in /billing/status fixed (was 500, now 200). Edit-stream verified.
+  Webhook route logs cleanly without stack trace for missing signature.
+
 ## Code Quality Fixes (2026-04-30)
 - Pre-initialized `reply` var in `coach_chat()` to silence undefined-variable linters.
 - Refactored `dashboard_summary()` from 86 lines / cyclomatic 22 / 25 locals into ~30-line

@@ -84,7 +84,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="w-full min-h-[260px]" style={{ height: 260 }}>
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minHeight={200} minWidth={200} debounce={50}>
               <LineChart data={data.trend}>
                 <CartesianGrid stroke="#173627" vertical={false} />
                 <XAxis dataKey="month" stroke="#A3B3AA" fontSize={12} />
@@ -106,7 +106,7 @@ export default function Dashboard() {
             <div className="text-sm text-[#A3B3AA] py-12 text-center">Log an income entry to see the mix.</div>
           ) : (
             <div className="w-full min-h-[260px]" style={{ height: 260 }}>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minHeight={200} minWidth={200} debounce={50}>
                 <PieChart>
                   <Pie data={pieData} innerRadius={60} outerRadius={90} paddingAngle={3} dataKey="value">
                     {pieData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}

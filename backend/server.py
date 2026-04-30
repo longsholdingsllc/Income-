@@ -649,12 +649,29 @@ async def billing_status(session_id: str, request: Request, user: dict = Depends
 
     # If already finalized, return cached status (idempotent — never grant credit twice)
     if tx.get("payment_status") == "paid" and tx.get("credit_applied"):
-        return {"payment_status": tx["payment_status"], "status": tx["status"], "amount_total": int(tx["amount"] * 100)}
+        return {
+            "payment_status": tx["payment_status"],
+            "status": tx["status"],
+            "amount_total": int(tx.get("amount_total") or (float(tx["amount"]) * 100)),
+            "currency": tx.get("currency", "usd"),
+        }
 
     host_url = str(request.base_url).rstrip("/")
     webhook_url = f"{host_url}/api/webhook/stripe"
     stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-    cs = await stripe_checkout.get_checkout_status(session_id)
+    try:
+        cs = await stripe_checkout.get_checkout_status(session_id)
+    except Exception as e:
+        # SDK can throw when Stripe has not yet propagated the session (especially
+        # immediately after creation). Fall back to the cached transaction record
+        # so the frontend poll loop sees a graceful pending state instead of 500.
+        logger.warning("stripe status fallback: %s", str(e)[:160])
+        return {
+            "payment_status": tx.get("payment_status", "unpaid"),
+            "status": tx.get("status", "open"),
+            "amount_total": int(float(tx["amount"]) * 100),
+            "currency": tx.get("currency", "usd"),
+        }
 
     # Persist status
     updates = {
@@ -695,15 +712,18 @@ async def billing_status(session_id: str, request: Request, user: dict = Depends
 
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request) -> dict:
+    signature = request.headers.get("Stripe-Signature")
+    if not signature:
+        # Reject quietly without a stack trace — Stripe will always send this header.
+        raise HTTPException(status_code=400, detail="Missing Stripe-Signature header")
     host_url = str(request.base_url).rstrip("/")
     webhook_url = f"{host_url}/api/webhook/stripe"
     stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
     body = await request.body()
-    signature = request.headers.get("Stripe-Signature", "")
     try:
         resp = await stripe_checkout.handle_webhook(body, signature)
     except Exception as e:
-        logger.exception("stripe webhook verification failed")
+        logger.warning("stripe webhook verification failed: %s", str(e)[:160])
         raise HTTPException(status_code=400, detail=f"Invalid webhook: {str(e)[:200]}")
 
     # Update the transaction and grant Pro if applicable

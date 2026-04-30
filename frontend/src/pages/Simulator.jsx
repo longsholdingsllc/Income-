@@ -82,7 +82,7 @@ export default function Simulator() {
             <h3 className="font-sans text-lg font-semibold mb-1">Growth curve</h3>
             <div className="text-xs text-[#A3B3AA] mb-4">{result.asset} · {form.years} years · {form.apy_percent}% APY</div>
             <div className="w-full min-h-[360px]" style={{ height: 360 }}>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minHeight={200} minWidth={200} debounce={50}>
                 <AreaChart data={result.series}>
                   <defs>
                     <linearGradient id="gValue" x1="0" y1="0" x2="0" y2="1">
