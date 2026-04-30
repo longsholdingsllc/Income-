@@ -1,0 +1,91 @@
+{
+  "theme": "dark",
+  "archetype": "Archetype 5 (Jewel & Luxury) blended with Archetype 1 (Organic & Earthy) - Deep Forest and Money Green",
+  "color_palette": {
+    "background_primary": "#04120C",
+    "background_secondary": "#071B13",
+    "background_surface": "#0C2419",
+    "text_primary": "#F4F0E6",
+    "text_secondary": "#A3B3AA",
+    "accent_primary": "#00D084",
+    "accent_secondary": "#10B981",
+    "border_color": "#173627",
+    "error": "#EF4444",
+    "success": "#00D084",
+    "warning": "#F59E0B",
+    "chart_colors": [
+      "#00D084",
+      "#059669",
+      "#34D399",
+      "#A7F3D0",
+      "#064E3B"
+    ]
+  },
+  "typography": {
+    "font_families": {
+      "heading": "'Cormorant Garamond', serif",
+      "body": "'Chivo', sans-serif",
+      "mono": "'JetBrains Mono', monospace"
+    },
+    "scale": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter leading-none font-serif font-medium text-text_primary",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-serif font-medium text-text_primary",
+      "h3": "text-xl sm:text-2xl font-sans tracking-tight font-semibold text-text_primary",
+      "h4": "text-lg sm:text-xl font-sans font-medium text-text_primary",
+      "body": "text-base font-sans leading-relaxed text-text_secondary",
+      "small": "text-sm font-sans text-text_secondary",
+      "numbers": "font-serif tracking-tighter leading-none text-accent_primary"
+    },
+    "instructions": "Use Cormorant Garamond for all massive hero numbers (e.g., total portfolio value, MRR) and main H1/H2 headings. Use Chivo for all UI elements, buttons, and dense data labels. Never use Inter or Roboto."
+  },
+  "layout_spacing": {
+    "grid_system": "Bento Grid (Control Room Grid for Dashboard)",
+    "container_padding": "Generous padding: p-6 or p-8 for cards",
+    "general": "Optical alignment over geometrical. Asymmetric hero section. Mobile-first design. Generous spacing."
+  },
+  "surfaces_micro_themes": {
+    "cards": "Flat solid background (#071B13), subtle 1px border (#173627). No generic box-shadows. On hover, translate-y-[-2px] and border lightens to #00D084/50.",
+    "glassmorphism": "Only for sticky nav: bg-[#04120C]/70 with backdrop-blur-xl and border-b border-[#173627]",
+    "buttons": "Primary CTA: bg-[#00D084] text-[#04120C] font-semibold. Hover: bg-[#10B981] text-[#04120C]. Secondary: bg-transparent border border-[#173627] text-[#F4F0E6]. Hover: border-[#00D084] text-[#00D084]."
+  },
+  "components": {
+    "forms": "Use highly customized Shadcn inputs with bg-[#071B13], border-[#173627], focus:border-[#00D084] focus:ring-1 focus:ring-[#00D084]",
+    "charts": "Recharts with dark mode support. Tooltips must use bg-[#0C2419] with border-[#173627]. Use bright green (#00D084) for line/area charts with a gradient fill to transparent.",
+    "icons": "lucide-react, 1.5px stroke width. Use sparse, meaningful icons.",
+    "testing": "All interactive elements MUST have data-testid attributes (e.g. data-testid='login-button', data-testid='add-income-stream-cta')."
+  },
+  "motion_interactions": {
+    "hover_states": "Micro-animations on hover: slight lift (-translate-y-1) for cards, color shifts for borders.",
+    "entrance": "Staggered fade-up for dashboard widgets and feed items using Framer Motion (initial={{opacity:0, y:20}} animate={{opacity:1, y:0}})."
+  },
+  "media_assets": {
+    "images": [
+      {
+        "category": "hero_background",
+        "url": "https://static.prod-images.emergentagent.com/jobs/2d82098c-b289-4a69-883e-f08e7335e324/images/fe8beaf6bdae82581ac43898864ad75d044dbcdf883e24d88c0214fb5bbb8842.png",
+        "description": "Abstract dark emerald green and cream 3D rendering of smooth organic topographical lines. Use as a background overlay in the hero section with low opacity (bg-black/40)."
+      },
+      {
+        "category": "ai_coach_avatar",
+        "url": "https://static.prod-images.emergentagent.com/jobs/2d82098c-b289-4a69-883e-f08e7335e324/images/237bc905f8e7e878395d8dbc1a6e866d4260767447fadb0ddbb6b149766374b2.png",
+        "description": "Minimalist premium 3D icon of a modern AI sphere. Use for the AI Coach Chat avatar."
+      },
+      {
+        "category": "auth_background",
+        "url": "https://static.prod-images.emergentagent.com/jobs/2d82098c-b289-4a69-883e-f08e7335e324/images/6705995315c5e421787564407532667ecdf22e6050e03877cf5d69e87cbcde17.png",
+        "description": "Dark elegant architectural interior. Use for the split-screen login/register page background."
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Implement a deep forest green dark theme based on the color palette. Never use default slate/gray/zinc.",
+    "Use Cormorant Garamond for all large metrics/numbers and H1/H2. Use Chivo for UI elements.",
+    "Avoid Inter and Roboto completely.",
+    "Use Recharts for the Income streams breakdown (donut chart), per-stream trend charts, and DCA compound growth line chart.",
+    "Dashboard must feel like a premium financial operating system: dense, precise, and dark.",
+    "Incorporate the generated images for the hero, AI coach avatar, and auth background.",
+    "Ensure every single interactive element has a data-testid attribute in kebab-case format.",
+    "Use strict Tailwind classes for colors mapping to the palette provided.",
+    "Add a subtle noise/grain texture overlay to the overall background to increase the premium feel."
+  ]
+}
