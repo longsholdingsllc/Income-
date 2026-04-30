@@ -30,6 +30,15 @@ email/password. Design: distinctive deep-forest-green premium wealth-OS (no purp
 - All API routes prefixed with `/api`. Frontend uses `REACT_APP_BACKEND_URL`.
 - Theme: Deep Forest Green dark mode. Cormorant Garamond (serif) + Chivo (sans) + JetBrains Mono.
 
+## Code Quality Fixes (2026-04-30)
+- Pre-initialized `reply` var in `coach_chat()` to silence undefined-variable linters.
+- Refactored `dashboard_summary()` from 86 lines / cyclomatic 22 / 25 locals into ~30-line
+  orchestrator + 7 focused helpers (`_parse_entry_date`, `_month_range`, `_month_offset`,
+  `_sum_between`, `_build_trend`, `_build_breakdown`, `_build_recent`).
+- Added return type annotations to all 17 API endpoints and test fixtures/methods.
+- Kept `is None` (PEP 8 idiomatic) — linter rule only targets string/number literals.
+- Ruff: all checks passed on server.py and backend_test.py.
+
 ## Implemented (2026-04-30)
 - Auth: register/login/me with JWT (14-day expiry) and bcrypt.
 - Streams: CRUD + entries CRUD + total_earned aggregation.
