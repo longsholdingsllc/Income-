@@ -321,14 +321,17 @@ async def create_stream(req: StreamCreate, user: dict = Depends(get_current_user
 @api_router.get("/streams", response_model=List[StreamOut])
 async def list_streams(user: dict = Depends(get_current_user)) -> List[StreamOut]:
     streams = await db.streams.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    # compute total earned per stream
+    if not streams:
+        return []
+    # Single aggregation across all streams (avoids N+1 query)
+    totals_cursor = db.entries.aggregate([
+        {"$match": {"user_id": user["id"]}},
+        {"$group": {"_id": "$stream_id", "total": {"$sum": "$amount"}}},
+    ])
+    totals = {row["_id"]: float(row["total"]) async for row in totals_cursor}
     result = []
     for s in streams:
-        agg = await db.entries.aggregate([
-            {"$match": {"stream_id": s["id"], "user_id": user["id"]}},
-            {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
-        ]).to_list(1)
-        s["total_earned"] = float(agg[0]["total"]) if agg else 0.0
+        s["total_earned"] = totals.get(s["id"], 0.0)
         result.append(StreamOut(**s))
     return result
 
@@ -444,18 +447,6 @@ def _build_trend(entries: List[dict], now: datetime, months: int = 6) -> List[di
     return trend
 
 
-def _build_breakdown(streams: List[dict], entries: List[dict]) -> List[dict]:
-    stream_cat = {s["id"]: s["category"] for s in streams}
-    by_cat: dict = {}
-    for e in entries:
-        cat = stream_cat.get(e["stream_id"], "other")
-        by_cat[cat] = by_cat.get(cat, 0.0) + float(e["amount"])
-    return [
-        {"category": k, "amount": round(v, 2)}
-        for k, v in sorted(by_cat.items(), key=lambda x: -x[1])
-    ]
-
-
 def _build_recent(streams: List[dict], entries: List[dict], limit: int = 8) -> List[dict]:
     name_by_id = {s["id"]: s["name"] for s in streams}
     recent = sorted(entries, key=lambda e: e.get("date", ""), reverse=True)[:limit]
@@ -475,13 +466,28 @@ def _build_recent(streams: List[dict], entries: List[dict], limit: int = 8) -> L
 @api_router.get("/dashboard/summary")
 async def dashboard_summary(user: dict = Depends(get_current_user)) -> dict:
     streams: List[dict] = await db.streams.find({"user_id": user["id"]}, {"_id": 0}).to_list(500)
-    entries: List[dict] = await db.entries.find({"user_id": user["id"]}, {"_id": 0}).to_list(5000)
 
     now = now_utc()
     month_start, _ = _month_range(now.year, now.month)
 
+    # Bound entries to last 7 months (covers 6-month trend + current). Production-safe
+    # for users with very long histories. Older entries still aggregate for total_earned via
+    # a single MongoDB pipeline below.
+    earliest_year, earliest_month = _month_offset(now, 6)
+    earliest_start, _ = _month_range(earliest_year, earliest_month)
+    entries: List[dict] = await db.entries.find(
+        {"user_id": user["id"], "date": {"$gte": iso(earliest_start)}},
+        {"_id": 0},
+    ).sort("date", -1).limit(2000).to_list(2000)
+
+    # All-time totals via a single aggregation (does not load all docs into memory)
     total_invested = sum(float(s.get("initial_investment", 0)) for s in streams)
-    total_earned = sum(float(e["amount"]) for e in entries)
+    earned_agg = await db.entries.aggregate([
+        {"$match": {"user_id": user["id"]}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(1)
+    total_earned = float(earned_agg[0]["total"]) if earned_agg else 0.0
+
     monthly = _sum_between(entries, month_start)
 
     goal = await db.goals.find_one({"user_id": user["id"]}, {"_id": 0})
@@ -489,13 +495,28 @@ async def dashboard_summary(user: dict = Depends(get_current_user)) -> dict:
     freedom_number = float(goal["freedom_number"]) if goal else 0.0
     progress = (monthly / monthly_target * 100.0) if monthly_target > 0 else 0.0
 
+    # Breakdown also via aggregation (covers full history, joined with stream categories)
+    breakdown_agg = await db.entries.aggregate([
+        {"$match": {"user_id": user["id"]}},
+        {"$group": {"_id": "$stream_id", "amount": {"$sum": "$amount"}}},
+    ]).to_list(1000)
+    stream_cat = {s["id"]: s["category"] for s in streams}
+    by_cat: dict = {}
+    for row in breakdown_agg:
+        cat = stream_cat.get(row["_id"], "other")
+        by_cat[cat] = by_cat.get(cat, 0.0) + float(row["amount"])
+    breakdown = [
+        {"category": k, "amount": round(v, 2)}
+        for k, v in sorted(by_cat.items(), key=lambda x: -x[1])
+    ]
+
     return {
         "total_invested": round(total_invested, 2),
         "total_earned": round(total_earned, 2),
         "monthly_income": round(monthly, 2),
         "active_streams": len(streams),
         "trend": _build_trend(entries, now, months=6),
-        "breakdown": _build_breakdown(streams, entries),
+        "breakdown": breakdown,
         "goal": {
             "monthly_target": monthly_target,
             "freedom_number": freedom_number,
