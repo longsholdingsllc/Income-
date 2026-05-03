@@ -2,8 +2,10 @@ import React, { useState } from "react";
 import { api } from "../lib/api";
 import { Copy, FileText, Sparkles, Check } from "lucide-react";
 import { AIError } from "../components/AIError";
+import { useBilling } from "../lib/billing";
 
 export default function Content() {
+  const { refresh: refreshBilling } = useBilling();
   const [form, setForm] = useState({ niche: "", keywords: "", target_audience: "", affiliate_product: "" });
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -18,7 +20,10 @@ export default function Content() {
       setResult(data);
     } catch (e2) {
       setErr(e2);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+      refreshBilling();
+    }
   };
 
   const copyArticle = () => {

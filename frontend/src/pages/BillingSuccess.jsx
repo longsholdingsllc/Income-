@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { CheckCircle2, Loader2, XCircle, ArrowRight } from "lucide-react";
+import { useBilling } from "../lib/billing";
 
 const MAX_POLLS = 10;
 const INTERVAL_MS = 2000;
@@ -10,6 +11,7 @@ const SANDBOX_FALLBACK_AFTER = 3; // after N stuck polls, try sandbox confirm
 export default function BillingSuccess() {
   const loc = useLocation();
   const nav = useNavigate();
+  const { refresh: refreshBilling } = useBilling();
   const [state, setState] = useState("polling"); // polling | paid | expired | failed
   const [message, setMessage] = useState("Checking your payment…");
   const attempts = useRef(0);
@@ -46,6 +48,7 @@ export default function BillingSuccess() {
         if (data.payment_status === "paid") {
           setState("paid");
           setMessage("Welcome to Pro. Unlimited AI is unlocked.");
+          refreshBilling();
           return;
         }
         if (data.status === "expired") {
@@ -61,6 +64,7 @@ export default function BillingSuccess() {
           if (ok && !cancelled) {
             setState("paid");
             setMessage("Welcome to Pro. Unlimited AI is unlocked.");
+            refreshBilling();
             return;
           }
         } else {

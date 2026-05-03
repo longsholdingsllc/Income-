@@ -3,8 +3,10 @@ import { api } from "../lib/api";
 import { motion } from "framer-motion";
 import { Sparkles, Clock, DollarSign, AlertTriangle, Wrench, ArrowRight } from "lucide-react";
 import { AIError } from "../components/AIError";
+import { useBilling } from "../lib/billing";
 
 export default function Ideas() {
+  const { refresh: refreshBilling } = useBilling();
   const [form, setForm] = useState({ skills: "", budget_usd: 500, hours_per_week: 5, risk_tolerance: "medium", interests: "" });
   const [ideas, setIdeas] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -20,7 +22,10 @@ export default function Ideas() {
       setIdeas(data.ideas || []);
     } catch (e2) {
       setErr(e2);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+      refreshBilling();
+    }
   };
 
   return (

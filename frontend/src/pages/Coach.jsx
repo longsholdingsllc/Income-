@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Plus, MessageSquare } from "lucide-react";
+import { useBilling } from "../lib/billing";
 
 const COACH_AVATAR = "https://static.prod-images.emergentagent.com/jobs/2d82098c-b289-4a69-883e-f08e7335e324/images/237bc905f8e7e878395d8dbc1a6e866d4260767447fadb0ddbb6b149766374b2.png";
 
@@ -13,6 +14,7 @@ const SUGGESTIONS = [
 ];
 
 export default function Coach() {
+  const { refresh: refreshBilling } = useBilling();
   const [sessions, setSessions] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -59,7 +61,7 @@ export default function Coach() {
           ? "Our AI is briefly throttled. Please try again in ~30 seconds."
           : detail;
       setMessages((m) => [...m, { role: "assistant", content: friendly, created_at: new Date().toISOString() }]);
-    } finally { setSending(false); }
+    } finally { setSending(false); refreshBilling(); }
   };
 
   const newChat = () => { setActiveId(null); setMessages([]); };

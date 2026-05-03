@@ -30,6 +30,20 @@ email/password. Design: distinctive deep-forest-green premium wealth-OS (no purp
 - All API routes prefixed with `/api`. Frontend uses `REACT_APP_BACKEND_URL`.
 - Theme: Deep Forest Green dark mode. Cormorant Garamond (serif) + Chivo (sans) + JetBrains Mono.
 
+## Iteration 4 — Conversion polish (2026-04-30)
+- **Sidebar quota chip** that shows live state: Free users see `X of 5 AI left this month`
+  with a progress bar (turns amber + "Almost out — upgrade to Pro" when ≤1 remains).
+  Pro users see `∞ PRO · UNLIMITED through <date>`. Click chip → /app/pricing.
+- Created `BillingProvider` (`/app/frontend/src/lib/billing.jsx`) wrapping the app.
+  All 3 AI pages (Ideas, Content, Coach) and BillingSuccess refresh billing context
+  after each call, so the chip updates instantly.
+- **Sandbox e2e fix**: added `POST /api/billing/dev/confirm/{session_id}` gated by
+  `STRIPE_API_KEY.startswith("sk_test_")`. Returns 404 in production. Idempotent via
+  `credit_applied`. BillingSuccess auto-calls it after 3 stuck-"initiated" polls when
+  `/billing/me.sandbox_mode==true`. Live e2e flow verified: register → checkout →
+  Stripe 4242 → return → "You're Pro." in ~8s.
+- Refactored Pro-grant logic into single `_grant_pro(user_id, package_id)` helper.
+
 ## Iteration 2 — Stripe Pro tier + P1 polish (2026-04-30)
 - **Stripe Pro tier** ($9 / 30 days) via emergentintegrations: `/api/billing/checkout`,
   `/api/billing/status/{session_id}` (graceful fallback if SDK can't find session yet),

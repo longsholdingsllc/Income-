@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "./App.css";
 import { AuthProvider, useAuth } from "./lib/auth";
+import { BillingProvider } from "./lib/billing";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -25,7 +26,8 @@ function Protected({ children }) {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
+      <BillingProvider>
+        <BrowserRouter>
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
@@ -44,6 +46,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
+      </BillingProvider>
     </AuthProvider>
   );
 }
