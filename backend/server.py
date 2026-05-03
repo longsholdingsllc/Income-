@@ -24,15 +24,17 @@ from emergentintegrations.payments.stripe.checkout import (
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB
+# MongoDB — required for the app to function. Emergent auto-injects these.
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Config
-EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
-JWT_SECRET = os.environ['JWT_SECRET']
-STRIPE_API_KEY = os.environ['STRIPE_API_KEY']
+# Config — read with .get() so a missing custom env var never crashes module import
+# (which would create a Kubernetes restart loop). Endpoints that need a particular key
+# will check at request time and return a clear 500 if it's missing.
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+JWT_SECRET = os.environ.get('JWT_SECRET', '')
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
 JWT_ALGO = "HS256"
 JWT_EXP_DAYS = 14
 CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
@@ -79,6 +81,8 @@ def verify_password(pw: str, hashed: str) -> bool:
 
 
 def create_jwt(user_id: str) -> str:
+    if not JWT_SECRET:
+        raise HTTPException(status_code=500, detail="Server auth is not configured (JWT_SECRET missing)")
     payload = {
         "sub": user_id,
         "iat": int(now_utc().timestamp()),
@@ -90,6 +94,8 @@ def create_jwt(user_id: str) -> str:
 async def get_current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> dict:
     if not creds or not creds.credentials:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if not JWT_SECRET:
+        raise HTTPException(status_code=500, detail="Server auth is not configured (JWT_SECRET missing)")
     try:
         payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
         user_id = payload.get("sub")
@@ -719,7 +725,7 @@ async def billing_status(session_id: str, request: Request, user: dict = Depends
     }
 
 
-SANDBOX_MODE = STRIPE_API_KEY.startswith("sk_test_")
+SANDBOX_MODE = STRIPE_API_KEY.startswith("sk_test_") if STRIPE_API_KEY else False
 
 
 async def _grant_pro(user_id: str, package_id: str) -> str:
@@ -830,6 +836,8 @@ def _extract_json(text: str):
 
 @api_router.post("/ai/ideas", response_model=IdeaResp)
 async def generate_ideas(req: IdeaReq, user: dict = Depends(get_current_user)) -> IdeaResp:
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=500, detail="AI is not configured (EMERGENT_LLM_KEY missing)")
     await _ai_quota_check_and_increment(user["id"])
     system_msg = (
         "You are a world-class passive income strategist. Generate specific, realistic, and actionable "
@@ -906,6 +914,8 @@ COACH_SYSTEM = (
 
 @api_router.post("/ai/coach/chat", response_model=CoachResp)
 async def coach_chat(req: CoachReq, user: dict = Depends(get_current_user)) -> CoachResp:
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=500, detail="AI is not configured (EMERGENT_LLM_KEY missing)")
     await _ai_quota_check_and_increment(user["id"])
     # Create or load session
     session_id = req.session_id
@@ -1013,6 +1023,19 @@ async def root() -> dict:
 
 # ---------- Wire up ----------
 app.include_router(api_router)
+
+
+# Root-level health endpoints (Kubernetes liveness/readiness probes hit these directly,
+# NOT under /api/). Without these, probes 404 and the pod is killed → restart loop.
+@app.get("/")
+async def app_root() -> dict:
+    return {"app": "Autopilot - Passive Income OS", "status": "ok"}
+
+
+@app.get("/health")
+async def app_health() -> dict:
+    return {"status": "healthy"}
+
 
 app.add_middleware(
     CORSMiddleware,
