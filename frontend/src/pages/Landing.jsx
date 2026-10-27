@@ -8,7 +8,7 @@ const HERO_IMG = "https://static.prod-images.emergentagent.com/jobs/2d82098c-b28
 const FEATURES = [
   { icon: TrendingUp, title: "Stream Tracker", desc: "Every dollar, every source — tracked in one command center." },
   { icon: Bot, title: "AI Idea Engine", desc: "Tailored passive-income ideas matched to your skills and budget." },
-  { icon: LineChart, title: "DCA Simulator", desc: "See exactly how $500/mo becomes a self-sustaining portfolio." },
+  { icon: LineChart, title: "Real-Money Tracking", desc: "Every chart is built from income you actually recorded. No projections, no simulations." },
   { icon: Coins, title: "Content Autopilot", desc: "SEO-ready affiliate posts generated in minutes, not weeks." },
   { icon: Target, title: "Freedom Number", desc: "Define your monthly target and watch progress in real time." },
   { icon: Sparkles, title: "AI Coach", desc: "Claude Sonnet 4.5 coaching you, 24/7 — weekly plans included." },
@@ -55,7 +55,7 @@ export default function Landing() {
             </h1>
             <p className="text-lg sm:text-xl text-[#A3B3AA] max-w-2xl leading-relaxed">
               A personal wealth operating system. Track every stream, generate ideas with AI,
-              auto-draft affiliate content, simulate compound growth, and get a coach in your pocket.
+              auto-draft affiliate content, track real growth from recorded income, and get a coach in your pocket.
             </p>
             <div className="flex flex-wrap items-center gap-3 mt-10">
               <Link to="/register" className="btn-primary" data-testid="hero-cta-register-btn">

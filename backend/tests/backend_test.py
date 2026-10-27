@@ -1,6 +1,6 @@
 """Backend regression tests for Autopilot - Passive Income OS.
 
-Covers: auth, streams, entries, dashboard, goals, AI ideas/content/coach, DCA simulator.
+Covers: auth, streams, entries, dashboard, goals, AI ideas/content/coach.
 Tests run against REACT_APP_BACKEND_URL (public preview URL).
 """
 import os
@@ -179,35 +179,6 @@ class TestGoals:
         r2 = session.get(f"{API}/goals", headers=auth_headers, timeout=DEFAULT_TIMEOUT)
         assert r2.json()["monthly_target"] == 5000
         assert r2.json()["freedom_number"] == 8000
-
-
-# ---------- DCA Simulator (no auth) ----------
-class TestDCA:
-    def test_dca_basic(self, session: requests.Session) -> None:
-        r = session.post(f"{API}/simulator/dca", json={
-            "asset": "BTC", "monthly_contribution": 200, "apy_percent": 8, "years": 5,
-        }, timeout=DEFAULT_TIMEOUT)
-        assert r.status_code == 200, r.text
-        d = r.json()
-        assert d["asset"] == "BTC"
-        assert d["total_contributed"] == 12000  # 200 * 60
-        assert d["final_value"] > d["total_contributed"]
-        assert d["total_interest"] > 0
-        assert d["monthly_passive_at_end"] > 0
-        assert isinstance(d["series"], list) and len(d["series"]) > 0
-
-    def test_dca_no_auth_required(self, session: requests.Session) -> None:
-        # explicitly without Authorization header - still works
-        r = requests.post(f"{API}/simulator/dca", json={
-            "asset": "ETH", "monthly_contribution": 100, "apy_percent": 5, "years": 1,
-        }, timeout=DEFAULT_TIMEOUT)
-        assert r.status_code == 200
-
-    def test_dca_invalid_years(self, session: requests.Session) -> None:
-        r = session.post(f"{API}/simulator/dca", json={
-            "asset": "BTC", "monthly_contribution": 100, "apy_percent": 5, "years": 0,
-        }, timeout=DEFAULT_TIMEOUT)
-        assert r.status_code == 422
 
 
 # ---------- AI Ideas ----------

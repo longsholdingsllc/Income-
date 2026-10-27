@@ -11,7 +11,6 @@ import Dashboard from "./pages/Dashboard";
 import Streams from "./pages/Streams";
 import Ideas from "./pages/Ideas";
 import Content from "./pages/Content";
-import Simulator from "./pages/Simulator";
 import Coach from "./pages/Coach";
 import Goals from "./pages/Goals";
 import Pricing from "./pages/Pricing";
@@ -37,7 +36,6 @@ export default function App() {
             <Route path="streams" element={<Streams />} />
             <Route path="ideas" element={<Ideas />} />
             <Route path="content" element={<Content />} />
-            <Route path="simulator" element={<Simulator />} />
             <Route path="coach" element={<Coach />} />
             <Route path="goals" element={<Goals />} />
             <Route path="pricing" element={<Pricing />} />
