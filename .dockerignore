@@ -1,0 +1,7 @@
+.git
+frontend/node_modules
+frontend/build
+backend/__pycache__
+backend/*.sqlite3
+**/__pycache__
+.emergent
