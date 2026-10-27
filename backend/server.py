@@ -254,6 +254,26 @@ class CoachMessage(BaseModel):
     created_at: str
 
 
+class DCAReq(BaseModel):
+    asset: str
+    monthly_contribution: float
+    apy_percent: float
+    years: int = Field(ge=1, le=50)
+
+
+class DCAPoint(BaseModel):
+    month: int
+    contributed: float
+    value: float
+
+
+class DCAResp(BaseModel):
+    asset: str
+    final_value: float
+    total_contributed: float
+    total_interest: float
+    monthly_passive_at_end: float
+    series: List[DCAPoint]
 
 
 class LeadCapture(BaseModel):
@@ -1124,6 +1144,32 @@ async def session_messages(session_id: str, user: dict = Depends(get_current_use
         {"session_id": session_id, "user_id": user["id"]}, {"_id": 0}
     ).sort("created_at", 1).to_list(1000)
     return [CoachMessage(role=m["role"], content=m["content"], created_at=m["created_at"]) for m in msgs]
+
+
+# ---------- DCA Simulator ----------
+@api_router.post("/simulator/dca", response_model=DCAResp)
+async def dca_simulator(req: DCAReq) -> DCAResp:
+    monthly_rate = (req.apy_percent / 100.0) / 12.0
+    months = req.years * 12
+    value = 0.0
+    contributed = 0.0
+    series: List[DCAPoint] = []
+    for m in range(1, months + 1):
+        value = value * (1 + monthly_rate) + req.monthly_contribution
+        contributed += req.monthly_contribution
+        if m % max(1, months // 60) == 0 or m == months:
+            series.append(DCAPoint(
+                month=m, contributed=round(contributed, 2), value=round(value, 2),
+            ))
+    monthly_passive_at_end = value * monthly_rate
+    return DCAResp(
+        asset=req.asset,
+        final_value=round(value, 2),
+        total_contributed=round(contributed, 2),
+        total_interest=round(value - contributed, 2),
+        monthly_passive_at_end=round(monthly_passive_at_end, 2),
+        series=series,
+    )
 
 
 # ---------- Health ----------

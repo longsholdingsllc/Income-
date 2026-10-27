@@ -2,13 +2,14 @@ import React from "react";
 import { NavLink, Outlet, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useBilling } from "../lib/billing";
-import { LayoutDashboard, Wallet, Lightbulb, FileText, Bot, Target, LogOut, Sparkles, Infinity as InfinityIcon } from "lucide-react";
+import { LayoutDashboard, Wallet, Lightbulb, FileText, LineChart, Bot, Target, LogOut, Sparkles, Infinity as InfinityIcon } from "lucide-react";
 
 const NAV = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard, end: true, tid: "nav-dashboard" },
   { to: "/app/streams", label: "Streams", icon: Wallet, tid: "nav-streams" },
   { to: "/app/ideas", label: "AI Ideas", icon: Lightbulb, tid: "nav-ideas" },
   { to: "/app/content", label: "Content", icon: FileText, tid: "nav-content" },
+  { to: "/app/simulator", label: "Simulator (Demo)", icon: LineChart, tid: "nav-simulator" },
   { to: "/app/coach", label: "AI Coach", icon: Bot, tid: "nav-coach" },
   { to: "/app/goals", label: "Goals", icon: Target, tid: "nav-goals" },
   { to: "/app/pricing", label: "Upgrade", icon: Sparkles, tid: "nav-pricing" },

@@ -6,6 +6,7 @@ import { Check, Sparkles, ArrowRight, Infinity as InfinityIcon } from "lucide-re
 const FREE_FEATURES = [
   "Track unlimited income streams",
   "Full dashboard & 6-month trend",
+  "DCA compound simulator (demo — hypothetical projections)",
   "Goals & freedom number",
   "5 AI generations / month",
 ];
